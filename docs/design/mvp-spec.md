@@ -28,10 +28,11 @@ Rationale (from [MCU comparison](../research/mcu-comparison.md)):
 | USB-FTDI Programmer | CP2102 or CH340 | 1 | $2 | For flashing (one-time, reusable) |
 | Power Supply | 5V 2A USB adapter + cable | 1 | $3 | Powers MCU + LEDs |
 | Jumper Wires | M-F dupont wires | ~10 | $1 | For prototyping |
+| OLED Display | SSD1306 128×64 I2C | 1 | $2 | "Eyes" — expressiveness via gaze/blink animations |
 | Breadboard | Half-size | 1 | $2 | Optional, for easy iteration |
 | Speaker (stretch) | MAX98357A I2S amp + 3W speaker | 1 | $4 | I2S audio output |
 
-**Total MVP cost: ~$16** (without speaker) / **~$20** (with speaker)
+**Total MVP cost: ~$18** (without speaker) / **~$22** (with speaker)
 
 ## Wiring Diagram (Rough)
 
@@ -42,12 +43,14 @@ ESP32-CAM (AI-Thinker)
 │  OV2640 [built-in]  │  ← Camera (CSI internally wired)
 │                     │
 │  GPIO 12 ──────────────→ WS2812B LED Strip (Data In)
+│  GPIO 14 (SDA) ────────→ SSD1306 OLED SDA (I2C)
+│  GPIO 15 (SCL) ────────→ SSD1306 OLED SCL (I2C)
 │  GPIO 13 ──────────────→ MAX98357A I2S BCLK  (stretch)
-│  GPIO 15 ──────────────→ MAX98357A I2S LRC   (stretch)
 │  GPIO 2  ──────────────→ MAX98357A I2S DIN   (stretch)
 │                     │
+│  3.3V ─────────────────→ OLED VCC
 │  5V  ──────────────────→ LED Strip VCC / Amp VCC
-│  GND ──────────────────→ LED Strip GND / Amp GND
+│  GND ──────────────────→ LED Strip GND / Amp GND / OLED GND
 │                     │
 │  [WiFi: 802.11 b/g/n]  ← Connects to local network
 └─────────────────────┘
@@ -55,9 +58,12 @@ ESP32-CAM (AI-Thinker)
 
 **GPIO allocation notes:**
 - GPIO 12: Safe for LED data (not used by camera or flash)
-- GPIO 13/15/2: Available for I2S audio when camera is not actively capturing (time-share)
+- GPIO 14/15: I2C bus for SSD1306 OLED display (eyes)
+- GPIO 13/2: Available for I2S audio when camera is not actively capturing (time-share)
 - GPIO 4: Reserved (onboard flash LED — can be used as status indicator)
-- MicroSD: Uses GPIO 14, 2, 15 — conflicts with I2S; pick one or the other
+- MicroSD: Uses GPIO 14, 2, 15 — conflicts with OLED I2C and I2S; disabled in MVP
+
+**Note on GPIO conflicts:** Using GPIO 14/15 for OLED means MicroSD is unavailable. This is acceptable for MVP — local buffering is not needed when streaming over WiFi.
 
 ## Software Architecture
 
@@ -81,6 +87,7 @@ ESP32-CAM (AI-Thinker)
 - **Web server:** Built-in HTTP server (AsyncWebServer library)
 - **Camera:** `esp_camera` driver, JPEG capture at VGA (640×480) or QVGA (320×240)
 - **LED:** FastLED or Adafruit NeoPixel library for WS2812B
+- **OLED Eyes:** U8g2 or Adafruit SSD1306 library for 128×64 display; renders eye animations at ~30fps
 - **Audio (stretch):** ESP8266Audio library for I2S output
 - **mDNS:** Advertise as `shell.local` for zero-config discovery
 
@@ -100,6 +107,8 @@ ESP32-CAM (AI-Thinker)
 | POST | `/led` | `{"mode": "solid", "color": [255, 100, 200]}` | `{"ok": true}` | Set LED color |
 | POST | `/led` | `{"mode": "breathe", "color": [0, 255, 0], "speed": 2}` | `{"ok": true}` | LED animation |
 | POST | `/led` | `{"mode": "off"}` | `{"ok": true}` | Turn off LEDs |
+| POST | `/eyes` | `{"expression": "happy"}` | `{"ok": true}` | Set eye expression |
+| POST | `/eyes` | `{"look": [0.3, -0.1]}` | `{"ok": true}` | Set gaze direction (x, y normalized) |
 | POST | `/audio` | `{"tone": 440, "duration": 500}` | `{"ok": true}` | Play tone (stretch) |
 
 ### LED Modes (v0.1)
@@ -112,13 +121,26 @@ ESP32-CAM (AI-Thinker)
 | `blink` | On/off flash | Alert / notification |
 | `off` | All off | Sleep / inactive |
 
+### Eye Expressions (v0.1)
+
+| Expression | Description | Use Case |
+|---|---|---|
+| `idle` | Slow blink every few seconds, subtle look-around | Default when awake |
+| `happy` | Curved "smiling" eyes (^_^) | Positive interaction |
+| `sad` | Droopy eyes with slow blinks | Error or disappointment |
+| `surprised` | Wide open eyes | Unexpected input |
+| `thinking` | Eyes look up-right, slow drift | Processing / generating |
+| `sleep` | Closed eyes, ZZZ animation | Inactive / standby |
+| `look` | Eyes track a direction via `look` param | Following user / object |
+
 ## Success Criteria
 
 The MVP is **done** when:
 
 1. ✅ **LED control works:** Agent sends HTTP command → LED changes color/pattern within 200ms
 2. ✅ **Camera capture works:** Agent requests photo → receives JPEG image within 2 seconds
-3. ✅ **Presence is visible:** An idle shell shows a gentle breathing LED — humans can see it's alive
+3. ✅ **Presence is visible:** An idle shell shows breathing LED + blinking eyes — humans can see it's alive
+3b. ✅ **Eyes work:** Agent sends expression/gaze command → OLED updates within 100ms
 4. ✅ **WiFi reliable:** Shell auto-reconnects after WiFi drop; uptime >1hr without manual intervention
 5. ✅ **Agent integration demo:** A script/agent loop that periodically takes a photo, "describes" it (via LLM), and changes LED color based on mood — proving the full perception→expression loop
 
