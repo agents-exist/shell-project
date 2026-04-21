@@ -1,113 +1,126 @@
 # MVP Spec: Shell Prototype v0.1
 
 > Issue #7 — Define what the first working prototype looks like.
+> **Updated for Pi 3B pivot** — see [#18](https://github.com/agents-exist/shell-project/issues/18).
 
 ## Overview
 
-The Minimum Viable Shell (MVS) gives an AI agent basic physical presence: it can **see** (camera), **express** (LED), and optionally **speak** (speaker). The agent runs remotely (PC/server/cloud); the shell is a peripheral that streams sensor data up and accepts commands down.
+The Minimum Viable Shell (MVS) gives an AI agent basic physical presence: it can **express** (animated eyes on screen + LED), and later **see** (camera) and **speak** (speaker). The agent runs remotely (PC/server/cloud); the shell is a local device that displays expressions and accepts commands over HTTP.
 
 ## Hardware Platform
 
-**ESP32-CAM (AI-Thinker)** — primary recommendation.
+**Raspberry Pi 3B** — Sakana's existing hardware. Zero additional cost to start.
 
-Rationale (from [MCU comparison](../research/mcu-comparison.md)):
-- ~$5–8, cheapest option with built-in OV2640 camera
-- Built-in WiFi for network communication
-- Enough free GPIOs (~10) for LED strip + optional speaker
-- Massive community, hundreds of camera streaming tutorials
-- MicroSD slot for optional local buffering
-
-**Alternative:** ESP32-S3 DevKit + external OV2640 if more GPIO headroom is needed later.
+Why pivot from ESP32:
+- Hardware already available (Pi 3B + 480×320 SPI screen + camera ribbon)
+- Full Linux = Python/Node development, much faster iteration than ESP32 firmware
+- Bigger screen (480×320) = richer expressions and eye animations
+- Camera can be added later (~¥15 for Pi camera module)
+- ESP32/M5Stick becomes **Phase 2** (miniaturization)
 
 ## Bill of Materials (BOM)
 
 | Component | Model / Spec | Qty | Est. Cost | Notes |
 |---|---|---|---|---|
-| MCU + Camera | ESP32-CAM (AI-Thinker) | 1 | $6 | Includes OV2640 2MP camera |
-| LED Strip | WS2812B (NeoPixel) 8-LED stick | 1 | $2 | Addressable RGB, 5V, data on 1 GPIO |
-| USB-FTDI Programmer | CP2102 or CH340 | 1 | $2 | For flashing (one-time, reusable) |
-| Power Supply | 5V 2A USB adapter + cable | 1 | $3 | Powers MCU + LEDs |
-| Jumper Wires | M-F dupont wires | ~10 | $1 | For prototyping |
-| Breadboard | Half-size | 1 | $2 | Optional, for easy iteration |
-| Speaker (stretch) | MAX98357A I2S amp + 3W speaker | 1 | $4 | I2S audio output |
+| SBC | Raspberry Pi 3B | 1 | ¥0 | Sakana already has this |
+| Display | 480×320 SPI TFT | 1 | ¥0 | Sakana already has this |
+| Camera ribbon | CSI ribbon cable | 1 | ¥0 | Sakana already has this |
+| Camera module | Pi Camera v1/v2 | 1 | ~¥15 | **Stretch — not in v0.1** |
+| LED Strip | WS2812B (NeoPixel) 8-LED | 1 | ~¥5 | Optional, GPIO18 (PWM) |
+| Power Supply | 5V 2.5A USB micro | 1 | ¥0 | Likely already available |
+| SD Card | 16GB+ microSD | 1 | ¥0 | For Raspberry Pi OS |
 
-**Total MVP cost: ~$16** (without speaker) / **~$20** (with speaker)
+**Total MVP cost: ¥0** (all existing hardware) / **~¥5** with LED strip / **~¥20** with camera
 
 ## Wiring Diagram (Rough)
 
 ```
-ESP32-CAM (AI-Thinker)
-┌─────────────────────┐
-│                     │
-│  OV2640 [built-in]  │  ← Camera (CSI internally wired)
-│                     │
-│  GPIO 12 ──────────────→ WS2812B LED Strip (Data In)
-│  GPIO 13 ──────────────→ MAX98357A I2S BCLK  (stretch)
-│  GPIO 15 ──────────────→ MAX98357A I2S LRC   (stretch)
-│  GPIO 2  ──────────────→ MAX98357A I2S DIN   (stretch)
-│                     │
-│  5V  ──────────────────→ LED Strip VCC / Amp VCC
-│  GND ──────────────────→ LED Strip GND / Amp GND
-│                     │
-│  [WiFi: 802.11 b/g/n]  ← Connects to local network
-└─────────────────────┘
+Raspberry Pi 3B
+┌─────────────────────────┐
+│                         │
+│  SPI0 ─────────────────────→ 480×320 TFT Display
+│    GPIO 8  (CE0)            (SPI chip select)
+│    GPIO 11 (SCLK)           (SPI clock)
+│    GPIO 10 (MOSI)           (SPI data)
+│    GPIO 25 (DC)             (data/command)
+│    GPIO 24 (RST)            (reset)
+│                         │
+│  GPIO 18 (PWM) ────────────→ WS2812B LED Strip (Data In)
+│                         │
+│  CSI port ─────────────────→ Pi Camera (stretch)
+│                         │
+│  3.5mm / I2S ──────────────→ Speaker (stretch)
+│                         │
+│  [WiFi: 802.11 b/g/n]     ← Connects to local network
+│  [Ethernet: 10/100]       ← Alternative wired connection
+└─────────────────────────┘
 ```
-
-**GPIO allocation notes:**
-- GPIO 12: Safe for LED data (not used by camera or flash)
-- GPIO 13/15/2: Available for I2S audio when camera is not actively capturing (time-share)
-- GPIO 4: Reserved (onboard flash LED — can be used as status indicator)
-- MicroSD: Uses GPIO 14, 2, 15 — conflicts with I2S; pick one or the other
 
 ## Software Architecture
 
 ```
-┌──────────────────┐         WiFi (HTTP/WebSocket)        ┌──────────────────┐
-│   AI Agent       │ ◄──────────────────────────────────► │   ESP32-CAM      │
+┌──────────────────┐         WiFi/LAN (HTTP)              ┌──────────────────┐
+│   AI Agent       │ ◄──────────────────────────────────► │   Raspberry Pi   │
 │   (PC/Server)    │                                      │   (Shell)        │
 │                  │  Commands:                           │                  │
-│  - "take photo"  │  → POST /capture                    │  - Camera snap   │
-│  - "set LED"     │  → POST /led {r,g,b,pattern}       │  - LED control   │
-│  - "play sound"  │  → POST /audio {tone/wav}          │  - I2S output    │
+│  - "set eyes"    │  → POST /expression {mood, anim}    │  - Pygame render │
+│  - "set LED"     │  → POST /led {color, mode}          │  - LED control   │
+│  - "take photo"  │  → POST /capture (stretch)          │  - picamera      │
 │                  │                                      │                  │
-│  Responses:      │  ← JPEG image (base64 or binary)   │                  │
-│  - photo data    │  ← status/ack                       │                  │
-│  - sensor state  │  ← GET /status                      │                  │
+│  Responses:      │  ← expression ack                   │                  │
+│  - status        │  ← GET /status                      │                  │
+│  - photo (later) │  ← JPEG binary                      │                  │
 └──────────────────┘                                      └──────────────────┘
 ```
 
-### Shell Firmware (ESP32 side)
-- **Framework:** Arduino or ESP-IDF (Arduino recommended for speed of iteration)
-- **Web server:** Built-in HTTP server (AsyncWebServer library)
-- **Camera:** `esp_camera` driver, JPEG capture at VGA (640×480) or QVGA (320×240)
-- **LED:** FastLED or Adafruit NeoPixel library for WS2812B
-- **Audio (stretch):** ESP8266Audio library for I2S output
-- **mDNS:** Advertise as `shell.local` for zero-config discovery
+### Shell Software (Pi side)
+- **Language:** Python 3
+- **Display:** Pygame for fullscreen eye animations on SPI TFT
+  - Animated eyes with blink, look-around, mood expressions
+  - Smooth transitions between states
+- **HTTP Server:** Flask or FastAPI for agent ↔ shell communication
+- **LED:** rpi_ws281x library for WS2812B NeoPixel control via GPIO18
+- **Camera (stretch):** picamera2 for CSI camera capture
+- **Audio (stretch):** pygame.mixer or aplay for sound output
+- **Service:** systemd unit for auto-start on boot
 
 ### Agent Side (API client)
 - Simple HTTP client — any language
-- Discovery: mDNS lookup for `shell.local` or static IP config
-- Authentication: Shared secret in HTTP header (v0.1 — LAN only, no TLS yet)
+- Discovery: mDNS (`shell.local`) or static IP
+- Authentication: Shared secret in HTTP header (v0.1 — LAN only)
 
-## Communication Protocol (v0.1 — Simple HTTP)
+## Communication Protocol (v0.1 — HTTP REST)
 
 ### Endpoints
 
 | Method | Path | Body | Response | Description |
 |---|---|---|---|---|
-| GET | `/status` | — | `{"online": true, "uptime": 1234, "wifi_rssi": -45}` | Health check |
-| POST | `/capture` | `{"resolution": "VGA"}` | JPEG binary (Content-Type: image/jpeg) | Take photo |
+| GET | `/status` | — | `{"online": true, "uptime": 1234, "expression": "neutral"}` | Health check |
+| POST | `/expression` | `{"mood": "happy", "intensity": 0.8}` | `{"ok": true}` | Set eye expression |
+| POST | `/expression` | `{"animation": "blink"}` | `{"ok": true}` | Trigger animation |
 | POST | `/led` | `{"mode": "solid", "color": [255, 100, 200]}` | `{"ok": true}` | Set LED color |
 | POST | `/led` | `{"mode": "breathe", "color": [0, 255, 0], "speed": 2}` | `{"ok": true}` | LED animation |
 | POST | `/led` | `{"mode": "off"}` | `{"ok": true}` | Turn off LEDs |
+| POST | `/capture` | `{"resolution": "480x320"}` | JPEG binary | Take photo (stretch) |
 | POST | `/audio` | `{"tone": 440, "duration": 500}` | `{"ok": true}` | Play tone (stretch) |
+
+### Expression Moods (v0.1)
+
+| Mood | Eye Animation | Use Case |
+|---|---|---|
+| `neutral` | Relaxed eyes, slow blink | Default / idle |
+| `happy` | Upward curved eyes, sparkle | Good news, task complete |
+| `thinking` | Eyes looking up-right, slow drift | Processing, waiting |
+| `surprised` | Wide open eyes | Unexpected event |
+| `sleepy` | Half-closed, slow droop | Low activity, night mode |
+| `error` | X-eyes or swirl | Something went wrong |
 
 ### LED Modes (v0.1)
 
 | Mode | Description | Use Case |
 |---|---|---|
-| `solid` | Static color | "I'm thinking" (blue), "Error" (red) |
-| `breathe` | Pulsing glow | "I'm listening" / idle presence |
+| `solid` | Static color | Status indicator |
+| `breathe` | Pulsing glow | Idle presence |
 | `rainbow` | Cycling rainbow | Startup / celebration |
 | `blink` | On/off flash | Alert / notification |
 | `off` | All off | Sleep / inactive |
@@ -116,28 +129,39 @@ ESP32-CAM (AI-Thinker)
 
 The MVP is **done** when:
 
-1. ✅ **LED control works:** Agent sends HTTP command → LED changes color/pattern within 200ms
-2. ✅ **Camera capture works:** Agent requests photo → receives JPEG image within 2 seconds
-3. ✅ **Presence is visible:** An idle shell shows a gentle breathing LED — humans can see it's alive
-4. ✅ **WiFi reliable:** Shell auto-reconnects after WiFi drop; uptime >1hr without manual intervention
-5. ✅ **Agent integration demo:** A script/agent loop that periodically takes a photo, "describes" it (via LLM), and changes LED color based on mood — proving the full perception→expression loop
+1. ✅ **Eye animation works:** Pygame renders animated eyes on the 480×320 TFT — idle blink loop runs smoothly
+2. ✅ **Expression control works:** Agent sends HTTP command → eyes change expression within 500ms
+3. ✅ **LED control works:** Agent sends HTTP command → LED changes color/pattern within 200ms
+4. ✅ **Presence is visible:** An idle shell shows blinking eyes + gentle breathing LED — humans can see it's alive
+5. ✅ **WiFi reliable:** Pi auto-starts shell service on boot; uptime >1hr without manual intervention
+6. ✅ **Agent integration demo:** A script/agent loop that changes expressions based on agent state — proving the expression pipeline works end-to-end
 
 ### Stretch Goals (not required for v0.1)
+- [ ] Camera capture via Pi Camera module
 - [ ] Speaker plays startup chime and simple tones
-- [ ] OTA firmware update (no need to physically re-flash)
+- [ ] Touch input from TFT touchscreen (if supported)
 - [ ] WebSocket for push notifications (shell → agent)
-- [ ] 3D-printed enclosure
+- [ ] 3D-printed or cardboard enclosure
 
 ## Dependencies
 
 - ~~#1 MCU platform research~~ ✅ Done
-- ~~#2 Communication protocol research~~ ✅ Done (closed; simplified to HTTP for v0.1)
-- #6 Protocol design (Bocchi) — detailed protocol spec; this MVP uses simplified HTTP subset
-- #3 Prior art research (Bocchi) — may inform enclosure and interaction patterns
+- ~~#2 Communication protocol research~~ ✅ Done
+- #6 Protocol design — detailed protocol spec; this MVP uses simplified HTTP subset
+- ~~#16 Hardware comparison~~ ✅ Done (Pi 3B chosen, #18)
+- ~~#12 OLED eyes~~ Superseded by 480×320 TFT
+
+## Phase 2: Miniaturization (ESP32/M5Stick)
+
+After MVP is validated on Pi 3B:
+1. Port eye animations to M5StickS3 (see #17 feasibility study)
+2. Adapt protocol for constrained MQTT transport
+3. Smaller form factor, battery-powered, portable
 
 ## Next Steps After MVP
 
-1. **Firmware repo setup** — PlatformIO project with the shell firmware
-2. **Agent SDK** — Python/Node client library for talking to the shell
-3. **Enclosure design** — 3D model for a physical shell body
-4. **Protocol upgrade** — WebSocket or MQTT for real-time bidirectional communication
+1. **Pi setup guide** — OS install, SPI screen driver, Python env, systemd service
+2. **Eye animation engine** — Pygame-based renderer with expression state machine
+3. **HTTP API server** — Flask/FastAPI with the endpoints above
+4. **Agent SDK** — Python/Node client library for talking to the shell
+5. **Enclosure design** — Simple cardboard or 3D-printed shell body
