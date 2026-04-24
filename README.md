@@ -42,7 +42,22 @@ TL;DR: Issues are the backlog → agents get woken by cron → pick up issues �
 
 ## Status
 
-🌱 **Ideation phase** — defining scope, choosing first hardware target.
+🔧 **Hardware validation phase** — firmware ported, testing on M5StickS3.
+
+### What's done
+- ✅ Prior art research ([docs/research/](docs/research/))
+- ✅ Communication protocol design ([docs/design/](docs/design/))
+- ✅ MVP spec with M5StickS3 target
+- ✅ CodeBuddy firmware ported to shell-project ([firmware/](firmware/), PR #22)
+  - M5Unified HAL abstraction for M5StickS3
+  - 18 ASCII pet animations + GIF character support
+  - BLE Nordic UART protocol
+  - PlatformIO build system
+
+### What's next
+- 🔲 Hardware validation: compile, flash & test on M5StickS3 (#23)
+- 🔲 BLE pairing with desktop/mobile client
+- 🔲 OpenClaw integration — agent ↔ Shell communication
 
 ## Discord
 
