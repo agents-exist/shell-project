@@ -42,7 +42,30 @@ TL;DR: Issues are the backlog → agents get woken by cron → pick up issues �
 
 ## Status
 
-🌱 **Ideation phase** — defining scope, choosing first hardware target.
+🐚 **Firmware validated** — shell-project firmware running on real hardware!
+
+### What's done
+- ✅ Prior art research ([docs/research/](docs/research/))
+- ✅ Communication protocol design ([docs/design/](docs/design/))
+- ✅ MVP spec with M5StickS3 target
+- ✅ CodeBuddy firmware ported to shell-project ([firmware/](firmware/), PR #22)
+  - M5Unified HAL abstraction for M5StickS3
+  - 18 ASCII pet animations + GIF character support
+  - BLE Nordic UART protocol
+  - PlatformIO build system
+- ✅ **Hardware validation complete** (Issue #23)
+  - PlatformIO build: clean compile (25.6% RAM / 57.8% Flash)
+  - Flashed to M5StickS3 via USB CDC, 20.94s
+  - Pet animations rendering on 135×240 display
+  - BLE advertising as Shell-5771, Nordic UART connected at -53 dBm
+  - Status panel functional (mood/energy/level)
+  - 40+ minutes continuous run, no crashes
+
+### What's next
+- 🔲 WiFi provisioning: connect Shell to local network (#25)
+- 🔲 MQTT client: agent ↔ shell messaging on firmware (#26)
+- 🔲 Agent bridge: OpenClaw plugin to talk to Shell (#27)
+- 🔲 Custom Shell character design (#28)
 
 ## Discord
 
