@@ -179,7 +179,7 @@ inline uint8_t statsFedProgress() {
 struct Settings {
   bool sound;
   bool bt;
-  bool wifi;     // placeholder — no WiFi stack linked yet, just stores the pref
+  bool wifi;     // WiFi enable/disable preference (wifi_manager.cpp checks this)
   bool led;
   bool hud;
   uint8_t clockRot;  // 0=auto 1=portrait 2=landscape

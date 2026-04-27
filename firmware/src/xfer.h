@@ -73,6 +73,7 @@ void ownerSet(const char* name);
 const char* ownerName();
 #include "stats.h"
 #include "board_compat.h"
+#include "wifi_manager.h"
 
 inline bool xferCommand(JsonDocument& doc) {
   const char* cmd = doc["cmd"];
@@ -106,6 +107,32 @@ inline bool xferCommand(JsonDocument& doc) {
     const char* n = doc["name"];
     if (n) ownerSet(n);
     _xAck("owner", n != nullptr);
+    return true;
+  }
+
+  if (strcmp(cmd, "wifi") == 0) {
+    const char* ssid = doc["ssid"];
+    const char* pass = doc["pass"];
+    if (ssid) {
+      wifiSetCredentials(ssid, pass ? pass : "");
+      _xAck("wifi", true);
+    } else {
+      _xAck("wifi", false);
+    }
+    return true;
+  }
+
+  if (strcmp(cmd, "wifi_status") == 0) {
+    char b[160];
+    int len = snprintf(b, sizeof(b),
+      "{\"ack\":\"wifi_status\",\"ok\":true,\"n\":0,"
+      "\"ssid\":\"%s\",\"connected\":%s,\"ip\":\"%s\"}\n",
+      wifiSSID(),
+      wifiIsConnected() ? "true" : "false",
+      wifiIsConnected() ? wifiStatusStr() : ""
+    );
+    Serial.write(b, len);
+    bleWrite((const uint8_t*)b, len);
     return true;
   }
 
