@@ -10,6 +10,7 @@
 #include "persona_logic.h"
 #include "utf8_text_logic.h"
 #include "buddy.h"
+#include "wifi_manager.h"
 
 TFT_eSprite spr = TFT_eSprite(&M5.Lcd);
 
@@ -155,9 +156,9 @@ static void sendCmd(const char* json) {
   bleWrite((const uint8_t*)json, n);
   bleWrite((const uint8_t*)"\n", 1);
 }
-const uint8_t INFO_PAGES = 6;
+const uint8_t INFO_PAGES = 7;
 const uint8_t INFO_PG_BUTTONS = 1;
-const uint8_t INFO_PG_CREDITS = 5;
+const uint8_t INFO_PG_CREDITS = 6;
 
 void applyDisplayMode() {
   bool peek = displayMode != DISP_NORMAL;
@@ -201,7 +202,7 @@ static void applySetting(uint8_t idx) {
       // hard-off someday, stop advertising via BLEDevice::getAdvertising().
       s.bt = !s.bt;
       break;
-    case 3: s.wifi = !s.wifi; break;   // stored only — no WiFi stack linked
+    case 3: s.wifi = !s.wifi; break;   // stored + controls WiFi in wifi_manager
     case 4: s.led = !s.led; break;
     case 5: s.hud = !s.hud; break;
     case 6: s.clockRot = (s.clockRot + 1) % 3; break;
@@ -706,6 +707,35 @@ void drawInfo() {
       ln(" connect agent");
     }
 
+  } else if (infoPage == 5) {
+    _infoHeader(p, y, "WIFI", infoPage);
+    bool conn = wifiIsConnected();
+
+    spr.setTextColor(conn ? GREEN : HOT, p.bg);
+    spr.setTextSize(2);
+    spr.setCursor(4, y);
+    spr.print(conn ? "connected" : (wifiHasCredentials() ? "connecting" : "no creds"));
+    spr.setTextSize(1);
+    y += 20;
+
+    spr.setTextColor(p.textDim, p.bg);
+    if (wifiHasCredentials()) {
+      spr.setTextColor(p.text, p.bg);
+      ln("  ssid    %s", wifiSSID());
+      spr.setTextColor(p.textDim, p.bg);
+      ln("  status  %s", wifiStatusStr());
+    }
+    y += 8;
+    if (!wifiHasCredentials()) {
+      spr.setTextColor(p.text, p.bg);
+      ln("TO PROVISION");
+      spr.setTextColor(p.textDim, p.bg);
+      ln(" send via BLE:");
+      ln(" {\"cmd\":\"wifi\",");
+      ln("  \"ssid\":\"...\",");
+      ln("  \"pass\":\"...\"}");
+    }
+
   } else {
     _infoHeader(p, y, "CREDITS", infoPage);
     AboutInfo about = currentAboutInfo();
@@ -1027,6 +1057,7 @@ void setup() {
   lastInteractMs = millis();
   statsLoad();
   settingsLoad();
+  if (settings().wifi) wifiInit();
   petNameLoad();
   buddyInit();
 
@@ -1071,6 +1102,7 @@ void loop() {
   uint32_t now = millis();
 
   dataPoll(&tama);
+  if (settings().wifi) wifiPoll();
   if (statsPollLevelUp()) triggerOneShot(P_CELEBRATE, 3000);
   baseState = derive(tama);
 
